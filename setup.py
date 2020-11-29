@@ -48,8 +48,8 @@ gui_scripts = [
 ]
 
 config = {
-    'name': 'cityscapesScripts',
-    'description': 'Scripts for the Cityscapes Dataset',
+    'name': 'cityscapesScripts_harperMod',
+    'description': 'Scripts for the Cityscapes Dataset. Modified for cloud integration w/ download continuation and unzip',
     'long_description': readme,
     'long_description_content_type': "text/markdown",
     'author': 'Marius Cordts',

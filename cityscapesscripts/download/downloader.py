@@ -11,8 +11,11 @@ import os
 import requests
 import shutil
 import stat
-
+import re
+from requests import HTTPError
 from builtins import input
+from zipfile import ZipFile
+
 
 
 def login():
@@ -25,7 +28,7 @@ def login():
         with open(credentials_file, 'r') as f:
             credentials = json.load(f)
     else:
-        username = input("Cityscapes username or email address: ")
+        username = inpucpt("Cityscapes username or email address: ")
         password = getpass.getpass("Cityscapes password: ")
 
         credentials = {
@@ -72,12 +75,31 @@ def list_available_packages(*, session):
     print("The following packages are available for download.")
     print("Please refer to https://www.cityscapes-dataset.com/downloads/ "
           "for additional packages and instructions on properly citing third party packages.")
+    total_size_gb = 0
     for p in packages:
         info = ' {} -> {}'.format(p['name'], p['size'])
+        total_size_gb += get_size_from_str(p['size'], 'GB')
         if p['thirdparty'] == '1':
             info += " (third party)"
         print(info)
+    
+    print(f" all -> {total_size_gb}GB (all available packages)")
 
+
+def get_size_from_str(package_size_str, output_units):
+    size_convert_exp_si = {
+        "b": 0,
+        "kb": 1,
+        "mb": 2,
+        "gb": 3,
+        "tb": 4, 
+        "pb": 5
+    }
+    match = re.search(r'([0-9]+)([A-Z]+)', package_size_str)    
+    pkg_size_b = float(match.group(1)) * 1000**size_convert_exp_si.get(match.group(2).lower())
+    pkg_size_output_units = pkg_size_b / 1000**size_convert_exp_si.get(output_units.lower())
+    return pkg_size_output_units
+    
 
 def download_packages(*, session, package_names, destination_path, resume=False):
     if not os.path.isdir(destination_path):
@@ -85,17 +107,26 @@ def download_packages(*, session, package_names, destination_path, resume=False)
             "Destination path '{}' does not exist.".format(destination_path))
 
     packages = get_available_packages(session=session)
+
+    # Check if user wants to download all packages
+    if 'all' in [str.lower(p) for p in package_names]:
+        print(f"Downloading all available packages: "
+              f"{[p['name'] for p in packages]}")
+        package_names = [p['name'] for p in packages]
+
+    # Check for invalid packages names
     name_to_id = {p['name']: p['packageID'] for p in packages}
     invalid_names = [n for n in package_names if n not in name_to_id]
     if invalid_names:
         raise Exception(
             "These packages do not exist or you don't have access: {}".format(invalid_names))
 
+    
     for package_name in package_names:
         local_filename = os.path.join(destination_path, package_name)
         package_id = name_to_id[package_name]
 
-        print("Downloading cityscapes package '{}' to '{}'".format(
+        print("Downloading cityscapes package '{}' to '{}' ...".format(
             package_name, local_filename))
 
         if os.path.exists(local_filename):
@@ -116,21 +147,42 @@ def download_packages(*, session, package_names, destination_path, resume=False)
         url = "https://www.cityscapes-dataset.com/file-handling/?packageID={}".format(
             package_id)
         with open(local_filename, 'ab' if resume else 'wb') as f:
+            skip_package = False
             resume_header = {
                 'Range': 'bytes={}-'.format(f.tell())} if resume else {}
             with session.get(url, allow_redirects=False, stream=True, headers=resume_header) as r:
-                r.raise_for_status()
-                assert r.status_code in [200, 206]
+                try:
+                    r.raise_for_status()
+                    assert r.status_code in [200, 206]
+                except HTTPError as err:
+                    if err.response.status_code == 416:
+                        print(f"HTTP Client Error {err.response.status_code}: {err.response.reason}\n"
+                                f"Resume header specified a byte range of 'bytes={f.tell()}'\n"
+                                f"for {package_name}. Download has already completed. Moving on.\n")
+                        skip_package = True
+                    else:
+                        print(f"Unhandled HTTP Error {err.response.status_code}: {err.response.reason}\n"
+                                f"for package {package_name}. Skipping.")
+                        skip_package = True
+                except:
+                    print(f"An unhandled exception has occured downloading {package_name}! Skipping.")
+                    skip_package = True
 
-                shutil.copyfileobj(r.raw, f)
+                if skip_package:
+                    f.close() 
+                    continue
 
-        # verify md5sum
-        hash_md5 = hashlib.md5()
-        with open(local_filename, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                hash_md5.update(chunk)
-        if md5sum != hash_md5.hexdigest():
-            raise Exception("MD5 sum of downloaded file does not match.")
+                else:
+
+                    shutil.copyfileobj(r.raw, f)
+
+                    # verify md5sum
+                    hash_md5 = hashlib.md5()
+                    with open(local_filename, "rb") as f:
+                        for chunk in iter(lambda: f.read(4096), b""):
+                            hash_md5.update(chunk)
+                    if md5sum != hash_md5.hexdigest():
+                        raise Exception("MD5 sum of downloaded file does not match.")
 
 
 def parse_arguments():
@@ -146,6 +198,9 @@ def parse_arguments():
 
     parser.add_argument('-r', '--resume', action='store_true',
                         help="resume previous download")
+
+    parser.add_argument('-u', '--unzip', action='store_true', 
+                        help='Unzip packages to specified directory')
 
     parser.add_argument('package_name', nargs='*',
                         help="name of the packages to download")
