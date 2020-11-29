@@ -28,7 +28,7 @@ def login():
         with open(credentials_file, 'r') as f:
             credentials = json.load(f)
     else:
-        username = inpucpt("Cityscapes username or email address: ")
+        username = input("Cityscapes username or email address: ")
         password = getpass.getpass("Cityscapes password: ")
 
         credentials = {
