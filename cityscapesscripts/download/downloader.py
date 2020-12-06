@@ -182,7 +182,7 @@ def download_packages(*, session, package_names, destination_path, resume=False)
                         for chunk in iter(lambda: f.read(4096), b""):
                             hash_md5.update(chunk)
                     if md5sum != hash_md5.hexdigest():
-                        raise Exception("MD5 sum of downloaded file does not match.")
+                        print(f"MD5 sum does not match for: {package_name}.\n\tThis can be ignored if using the google drive API")
 
 
 def parse_arguments():
